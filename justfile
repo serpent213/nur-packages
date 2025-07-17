@@ -1,6 +1,9 @@
 help:
     @just --list
 
+build-pkg PACKAGE:
+    nix-build --arg pkgs 'import <nixpkgs> {}' -A {{PACKAGE}}
+
 eval-pkgs:
     @nix-env -f . -qa \* --meta \
         --allowed-uris https://static.rust-lang.org \
