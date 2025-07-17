@@ -14,5 +14,8 @@ eval-pkgs:
         -I ./ \
         --json | jq -r 'values | .[].name'
 
+eval-module MODULE:
+    nix-instantiate --eval -E "let pkgs = import <nixpkgs> {}; in (import ./modules {inherit pkgs;}).{{MODULE}}"
+
 trigger-update:
     curl -XPOST https://nur-update.nix-community.org/update?repo=serpent213

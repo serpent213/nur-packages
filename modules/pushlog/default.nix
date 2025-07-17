@@ -45,7 +45,12 @@ in {
   options.services.pushlog = {
     enable = mkEnableOption "pushlog service to forward journald logs to Pushover";
 
-    package = mkPackageOption pkgs "pushlog" {};
+    # package = mkPackageOption pkgs "pushlog" {};
+
+    package = mkOption {
+      type = types.package;
+      default = pkgs.callPackage ../../pkgs/pushlog {};
+    };
 
     environmentFile = mkOption {
       type = with types; nullOr str;

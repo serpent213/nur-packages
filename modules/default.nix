@@ -1,3 +1,4 @@
 {pkgs}: {
-  pushlog = import ./pushlog {inherit pkgs;};
+  pushlog = ./pushlog;
+  remark42 = ./remark42;
 }
