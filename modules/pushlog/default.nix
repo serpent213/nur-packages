@@ -3,9 +3,9 @@
   config,
   pkgs,
   ...
-}: let
-  inherit
-    (lib)
+}:
+let
+  inherit (lib)
     getExe
     literalExpression
     mkEnableOption
@@ -16,7 +16,7 @@
     types
     ;
   cfg = config.services.pushlog;
-  settingsFormat = pkgs.formats.yaml {};
+  settingsFormat = pkgs.formats.yaml { };
   unitType = types.submodule {
     options = {
       match = mkOption {
@@ -31,17 +31,18 @@
       };
       include = mkOption {
         type = types.listOf types.str;
-        default = [];
+        default = [ ];
         description = "List of regex patterns to match in message content (empty matches all)";
       };
       exclude = mkOption {
         type = types.listOf types.str;
-        default = [];
+        default = [ ];
         description = "List of regex patterns to exclude from matches";
       };
     };
   };
-in {
+in
+{
   options.services.pushlog = {
     enable = mkEnableOption "pushlog service to forward journald logs to Pushover";
 
@@ -49,7 +50,7 @@ in {
 
     package = mkOption {
       type = types.package;
-      default = pkgs.callPackage ../../pkgs/pushlog {};
+      default = pkgs.callPackage ../../pkgs/pushlog { };
     };
 
     environmentFile = mkOption {
@@ -91,7 +92,7 @@ in {
           priority-map = mkOption {
             type = with types; attrsOf (ints.between (-2) 2);
             description = "Optional mapping from journald priorities (0-7) to Pushover priorities (-2, -1, 0, 1, 2), unmapped priorities will be mapped to 0";
-            default = {};
+            default = { };
             example = literalExpression ''
               {
                 "0" = 2;  # emerg -> emergency (2)
@@ -116,9 +117,10 @@ in {
 
   config = mkIf cfg.enable (
     let
-      format = pkgs.formats.yaml {};
+      format = pkgs.formats.yaml { };
       configFile = format.generate "pushlog.yaml" cfg.settings;
-    in {
+    in
+    {
       systemd.services.pushlog = {
         description = "Pushlog journal forwarder";
         requires = [
@@ -129,7 +131,7 @@ in {
           "network-online.target"
           "systemd-journald.service"
         ];
-        wantedBy = ["multi-user.target"];
+        wantedBy = [ "multi-user.target" ];
         serviceConfig =
           {
             ExecStart = "${getExe cfg.package} --config ${configFile}";
@@ -172,7 +174,7 @@ in {
   );
 
   meta = {
-    maintainers = with lib.maintainers; [serpent213];
+    maintainers = with lib.maintainers; [ serpent213 ];
     doc = ./pushlog.md;
   };
 }

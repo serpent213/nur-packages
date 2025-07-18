@@ -5,7 +5,8 @@
   fetchFromGitHub,
   nodejs_20,
   pnpm_8,
-}: let
+}:
+let
   # 1.14.0 stable was still based on pnpm 7, which is not available in nixpkgs
   version = "1.14.0-unstable-2025-07-07";
 
@@ -28,9 +29,10 @@
       sourceRoot = "${finalAttrs.src.name}/frontend";
       # Might require more cases...
       hash =
-        if stdenv.isDarwin && stdenv.isAarch64
-        then "sha256-2rfhOV+2RQr3A4dcvQkzgTVT8uXIW4l80XYZdPt/WDA=" # Darwin/aarch64
-        else "sha256-A+wqAr43hHWcoCIz8ClLHkIfM8/AVTnvybosCmTPGMY="; # Linux/x86_64
+        if stdenv.isDarwin && stdenv.isAarch64 then
+          "sha256-2rfhOV+2RQr3A4dcvQkzgTVT8uXIW4l80XYZdPt/WDA=" # Darwin/aarch64
+        else
+          "sha256-A+wqAr43hHWcoCIz8ClLHkIfM8/AVTnvybosCmTPGMY="; # Linux/x86_64
     };
 
     nativeBuildInputs = [
@@ -52,42 +54,42 @@
     '';
   });
 in
-  buildGoModule rec {
-    pname = "remark42";
-    inherit version src;
-    sourceRoot = "source/backend";
-    vendorHash = null;
+buildGoModule rec {
+  pname = "remark42";
+  inherit version src;
+  sourceRoot = "source/backend";
+  vendorHash = null;
 
-    preBuild = ''
-      cp -r ${frontend}/* ./app/cmd/web/
-      find ./app/cmd/web/ -regex '.*\.\(html\|js\|mjs\)$' \
-        -exec sed -i "s|{% REMARK_URL %}|http://127.0.0.1:8080|g" {} \;
-    '';
+  preBuild = ''
+    cp -r ${frontend}/* ./app/cmd/web/
+    find ./app/cmd/web/ -regex '.*\.\(html\|js\|mjs\)$' \
+      -exec sed -i "s|{% REMARK_URL %}|http://127.0.0.1:8080|g" {} \;
+  '';
 
-    ldflags = [
-      "-s"
-      "-w"
-      "-X main.revision=${version}"
-    ];
+  ldflags = [
+    "-s"
+    "-w"
+    "-X main.revision=${version}"
+  ];
 
-    subPackages = ["app"];
+  subPackages = [ "app" ];
 
-    # Skip tests due to flaky webhook test that sometimes fails
-    doCheck = false;
+  # Skip tests due to flaky webhook test that sometimes fails
+  doCheck = false;
 
-    postInstall = ''
-      mv $out/bin/app $out/bin/remark42
-      install -Dm755 ${src}/backend/scripts/backup.sh $out/bin/backup
-      install -Dm755 ${src}/backend/scripts/restore.sh $out/bin/restore
-      install -Dm755 ${src}/backend/scripts/import.sh $out/bin/import
-    '';
+  postInstall = ''
+    mv $out/bin/app $out/bin/remark42
+    install -Dm755 ${src}/backend/scripts/backup.sh $out/bin/backup
+    install -Dm755 ${src}/backend/scripts/restore.sh $out/bin/restore
+    install -Dm755 ${src}/backend/scripts/import.sh $out/bin/import
+  '';
 
-    meta = with lib; {
-      description = "Remark42 comment engine";
-      homepage = "https://remark42.com";
-      license = licenses.mit;
-      maintainers = with maintainers; [];
-      platforms = platforms.linux ++ platforms.darwin;
-      mainProgram = "remark42";
-    };
-  }
+  meta = with lib; {
+    description = "Remark42 comment engine";
+    homepage = "https://remark42.com";
+    license = licenses.mit;
+    maintainers = with maintainers; [ ];
+    platforms = platforms.linux ++ platforms.darwin;
+    mainProgram = "remark42";
+  };
+}

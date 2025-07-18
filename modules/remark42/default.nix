@@ -3,9 +3,9 @@
   config,
   pkgs,
   ...
-}: let
-  inherit
-    (lib)
+}:
+let
+  inherit (lib)
     getExe
     mkEnableOption
     mkIf
@@ -18,16 +18,14 @@
 
   # Create environment file content from settings
   environmentContent = lib.concatStringsSep "\n" (
-    lib.mapAttrsToList (name: value:
-      if value != null
-      then "${name}=${toString value}"
-      else "") (
+    lib.mapAttrsToList (name: value: if value != null then "${name}=${toString value}" else "") (
       lib.filterAttrs (name: value: value != null) cfg.environment
     )
   );
 
   environmentFile = pkgs.writeText "remark42.env" environmentContent;
-in {
+in
+{
   options.services.remark42 = {
     enable = mkEnableOption "remark42 comment engine";
 
@@ -35,7 +33,7 @@ in {
 
     package = mkOption {
       type = types.package;
-      default = pkgs.callPackage ../../pkgs/remark42 {};
+      default = pkgs.callPackage ../../pkgs/remark42 { };
     };
 
     user = mkOption {
@@ -79,7 +77,7 @@ in {
 
     sites = mkOption {
       type = types.listOf types.str;
-      default = ["remark"];
+      default = [ "remark" ];
       description = "Site name(s) that remark42 will serve";
       example = "[\"mysite\", \"blog\"]";
     };
@@ -130,7 +128,7 @@ in {
           ]
         )
       );
-      default = {};
+      default = { };
       description = ''
         Additional environment variables for remark42. Full list on
         https://remark42.com/docs/configuration/parameters/
@@ -176,7 +174,7 @@ in {
       isSystemUser = true;
     };
 
-    users.groups.${cfg.group} = {};
+    users.groups.${cfg.group} = { };
 
     # Ensure data directory exists with correct permissions
     # systemd.tmpfiles.rules = [
@@ -186,25 +184,23 @@ in {
 
     systemd.services.remark42 = {
       description = "Remark42 comment engine";
-      requires = ["network-online.target"];
-      after = ["network-online.target"];
-      wantedBy = ["multi-user.target"];
+      requires = [ "network-online.target" ];
+      after = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
 
-      environment =
-        {
-          REMARK_URL = cfg.url;
-          SITE = lib.concatStringsSep "," cfg.sites;
-          REMARK_PORT = toString cfg.port;
-          REMARK_ADDRESS = cfg.address;
-          STORE_BOLT_PATH = cfg.dataDir;
-          BACKUP_PATH = cfg.backup.path;
-          MAX_BACKUP_FILES = toString cfg.backup.maxFiles;
-          MAX_COMMENT_SIZE = toString cfg.maxCommentSize;
-          EDIT_TIME = cfg.editTimeLimit;
-          DEBUG = lib.boolToString cfg.debug;
-          AUTH_ANON = lib.boolToString cfg.anonymousAuth;
-        }
-        // cfg.environment;
+      environment = {
+        REMARK_URL = cfg.url;
+        SITE = lib.concatStringsSep "," cfg.sites;
+        REMARK_PORT = toString cfg.port;
+        REMARK_ADDRESS = cfg.address;
+        STORE_BOLT_PATH = cfg.dataDir;
+        BACKUP_PATH = cfg.backup.path;
+        MAX_BACKUP_FILES = toString cfg.backup.maxFiles;
+        MAX_COMMENT_SIZE = toString cfg.maxCommentSize;
+        EDIT_TIME = cfg.editTimeLimit;
+        DEBUG = lib.boolToString cfg.debug;
+        AUTH_ANON = lib.boolToString cfg.anonymousAuth;
+      } // cfg.environment;
 
       serviceConfig =
         {
@@ -231,7 +227,7 @@ in {
           ProtectKernelTunables = true;
           ProtectProc = "invisible";
           ProtectSystem = "strict";
-          ReadWritePaths = [cfg.dataDir];
+          ReadWritePaths = [ cfg.dataDir ];
           RemoveIPC = true;
           RestrictAddressFamilies = [
             "AF_INET"
@@ -256,7 +252,7 @@ in {
   };
 
   meta = {
-    maintainers = with lib.maintainers; [serpent213];
+    maintainers = with lib.maintainers; [ serpent213 ];
     doc = ./remark42.md;
   };
 }
