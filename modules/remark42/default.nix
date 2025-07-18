@@ -33,7 +33,7 @@ in
 
     package = mkOption {
       type = types.package;
-      default = pkgs.callPackage ../../pkgs/remark42 { };
+      default = pkgs.callPackage ../../pkgs/remark42 { customCSS = cfg.customCSS; };
     };
 
     user = mkOption {
@@ -139,6 +139,34 @@ in
           SMTP_HOST = "smtp.gmail.com";
           SMTP_PORT = 587;
           EMOJI = true;
+        }
+      '';
+    };
+
+    customCSS = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "Additional CSS rules to append to remark.css";
+      example = ''
+        :root {
+          --primary-color: 0, 170, 170;
+          --primary-brighter-color: 0, 153, 153;
+          --primary-darker-color: 0, 102, 102;
+          --primary-text-color: 38, 38, 38;
+          --secondary-text-color: 100, 116, 139;
+          --secondary-darker-text-color: 150, 150, 150;
+          --primary-background-color: 255, 255, 255;
+        }
+
+        :root .dark {
+          --primary-color: 0, 153, 153;
+          --primary-brighter-color: 0, 170, 170;
+          --primary-text-color: 241, 245, 249;
+          --primary-background-color: 38, 38, 38;
+          --secondary-text-color: 209, 213, 219;
+          --error-color: #ffa0a0;
+          --line-brighter-color: var(--color11);
+          --text-color: var(--white-color);
         }
       '';
     };

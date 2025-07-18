@@ -5,6 +5,7 @@
   fetchFromGitHub,
   nodejs_20,
   pnpm_8,
+  customCSS ? null,
 }:
 let
   # 1.14.0 stable was still based on pnpm 7, which is not available in nixpkgs
@@ -50,6 +51,9 @@ let
     installPhase = ''
       runHook preInstall
       cp -r public $out
+      ${lib.optionalString (customCSS != null) ''
+        echo "${customCSS}" >> $out/remark.css
+      ''}
       runHook postInstall
     '';
   });
