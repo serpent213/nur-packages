@@ -82,6 +82,11 @@ buildGoModule rec {
     install -Dm755 ${src}/backend/scripts/backup.sh $out/bin/backup
     install -Dm755 ${src}/backend/scripts/restore.sh $out/bin/restore
     install -Dm755 ${src}/backend/scripts/import.sh $out/bin/import
+
+    # These are embedded in the binary already. We duplicate them,
+    # so they can be served directly by a webserver as well.
+    mkdir -p $out/public
+    cp -R ${frontend}/* $out/public/
   '';
 
   meta = with lib; {
