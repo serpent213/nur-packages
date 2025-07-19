@@ -34,8 +34,7 @@ in
     package = mkOption {
       type = types.package;
       default = pkgs.callPackage ../../pkgs/remark42 {
-        customCSS = cfg.customCSS;
-        forceEuropeanDateTimeDisplay = cfg.forceEuropeanDateTimeDisplay;
+        inherit (cfg) customCSS;
       };
     };
 
@@ -176,12 +175,6 @@ in
           border-radius: 4px;
         }
       '';
-    };
-
-    forceEuropeanDateTimeDisplay = mkOption {
-      type = types.bool;
-      default = false;
-      description = "Force DD.MM.YYYY / HH:MM date/time format regardless of browser locale (change requires package rebuild)";
     };
 
     backup = {
