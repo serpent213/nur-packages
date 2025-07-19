@@ -6,6 +6,7 @@
   nodejs_20,
   pnpm_8,
   customCSS ? null,
+  forceEuropeanDateTimeDisplay ? false,
 }:
 let
   # 1.14.0 stable was still based on pnpm 7, which is not available in nixpkgs
@@ -44,6 +45,13 @@ let
     buildPhase = ''
       runHook preBuild
       cd frontend/apps/remark42
+      ${lib.optionalString forceEuropeanDateTimeDisplay ''
+        # Patch date/time formatting to force DD.MM.YYYY / HH:MM format
+        sed -i \
+          -e 's/day: intl\.formatDate(date)/day: intl.formatDate(date, { day: "2-digit", month: "2-digit", year: "numeric" })/' \
+          -e 's/time: intl\.formatTime(date)/time: intl.formatTime(date, { hour: "2-digit", minute: "2-digit", hour12: false })/' \
+          app/components/comment/comment.tsx
+      ''}
       pnpm build
       runHook postBuild
     '';

@@ -33,7 +33,10 @@ in
 
     package = mkOption {
       type = types.package;
-      default = pkgs.callPackage ../../pkgs/remark42 { customCSS = cfg.customCSS; };
+      default = pkgs.callPackage ../../pkgs/remark42 {
+        customCSS = cfg.customCSS;
+        forceEuropeanDateTimeDisplay = cfg.forceEuropeanDateTimeDisplay;
+      };
     };
 
     user = mkOption {
@@ -146,7 +149,7 @@ in
     customCSS = mkOption {
       type = types.nullOr types.str;
       default = null;
-      description = "Additional CSS rules to append to remark.css";
+      description = "Additional CSS rules to append to remark.css (change requires package rebuild)";
       example = ''
         :root {
           --primary-color: 0, 170, 170;
@@ -168,7 +171,17 @@ in
           --line-brighter-color: var(--color11);
           --text-color: var(--white-color);
         }
+
+        .comment-form {
+          border-radius: 4px;
+        }
       '';
+    };
+
+    forceEuropeanDateTimeDisplay = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Force DD.MM.YYYY / HH:MM date/time format regardless of browser locale (change requires package rebuild)";
     };
 
     backup = {
