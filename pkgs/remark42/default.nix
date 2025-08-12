@@ -28,6 +28,7 @@ let
     pnpmDeps = pnpm_8.fetchDeps {
       inherit (finalAttrs) pname version src;
       sourceRoot = "${finalAttrs.src.name}/frontend";
+      fetcherVersion = 2;
       # Might require more cases...
       hash =
         if stdenv.isDarwin && stdenv.isAarch64 then
