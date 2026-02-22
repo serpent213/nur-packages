@@ -16,6 +16,12 @@ From the NUR repo root:
 nix build .#osm-tiles-demo
 ```
 
+Example forcing a specific system (required on my macOS/Darwin to pick my x86_64-linux remote build host – Docker build requires some Linux build host):
+
+```bash
+nix-build . -A osm-tiles-demo --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
+```
+
 ## Load image into Docker
 
 ```bash

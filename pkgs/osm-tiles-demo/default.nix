@@ -59,6 +59,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
   nginxConf = pkgs.writeText "osm-tiles-demo-nginx.conf" ''
     worker_processes 1;
     pid /tmp/nginx.pid;
+    error_log /dev/stderr notice;
 
     events {
       worker_connections 1024;
