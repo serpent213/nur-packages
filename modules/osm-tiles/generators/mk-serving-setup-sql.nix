@@ -284,7 +284,7 @@ in ''
       ${lib.optionalString (localeCols != []) ","}
       ${localeNullColsList}
       ${lib.optionalString (localeCols != []) ","}
-      lowres.geom::geometry(Point,4326) AS geom
+      ST_PointOnSurface(ST_Transform(lowres.geom, 4326))::geometry(Point,4326) AS geom
     FROM ${quoteIdent lowresSchema}.${quoteIdent "lowres_place"} AS lowres;
 
     CREATE MATERIALIZED VIEW ${quoteIdent servingSchema}.${quoteIdent "landcover_low_z5"} AS

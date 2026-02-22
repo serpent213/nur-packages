@@ -12,6 +12,7 @@
   overlays = import ./overlays; # nixpkgs overlays
 
   martin = pkgs.callPackage ./pkgs/martin {};
+  osm-tiles-demo = pkgs.callPackage ./pkgs/osm-tiles-demo {};
   pushlog = pkgs.callPackage ./pkgs/pushlog {};
   remark42 = pkgs.callPackage ./pkgs/remark42 {};
 }
