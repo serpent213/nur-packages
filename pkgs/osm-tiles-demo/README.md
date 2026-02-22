@@ -30,6 +30,7 @@ nix-build . -A osm-tiles-demo --arg pkgs 'import <nixpkgs> { system = "x86_64-li
 - `countries` (list of Geofabrik path suffixes, default `[]`)
 - `ramMB` (integer, default `4096`; drives PostgreSQL managed-memory tuning in the demo)
 - `geofabrikBaseUrl` (default `https://download.geofabrik.de`)
+- `servingProfile` (`"openmaptiles"` or `"compact"`, default `"openmaptiles"`)
 
 Example:
 
@@ -38,6 +39,7 @@ nix-build . \
   -A osm-tiles-demo \
   --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }' \
   --arg ramMB 8192 \
+  --argstr servingProfile openmaptiles \
   --arg locales '["en" "de"]' \
   --arg countries '["europe/germany" "africa/senegal-and-gambia"]'
 ```

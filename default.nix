@@ -13,6 +13,7 @@
   geofabrikBaseUrl ? null,
   osm2pgsqlImportCacheMB ? null,
   osm2pgsqlImportProcesses ? null,
+  servingProfile ? null,
   maplibreCssUrl ? null,
   maplibreJsUrl ? null,
 }: let
@@ -25,6 +26,7 @@
     // optionalAttrs (geofabrikBaseUrl != null) {inherit geofabrikBaseUrl;}
     // optionalAttrs (osm2pgsqlImportCacheMB != null) {inherit osm2pgsqlImportCacheMB;}
     // optionalAttrs (osm2pgsqlImportProcesses != null) {inherit osm2pgsqlImportProcesses;}
+    // optionalAttrs (servingProfile != null) {inherit servingProfile;}
     // optionalAttrs (maplibreCssUrl != null) {inherit maplibreCssUrl;}
     // optionalAttrs (maplibreJsUrl != null) {inherit maplibreJsUrl;};
 in {

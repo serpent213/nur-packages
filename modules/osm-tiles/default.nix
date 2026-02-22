@@ -117,6 +117,7 @@
       pkgs
       ;
     locales = cfg.data.locales;
+    profile = cfg.serving.profile;
   };
 
   servingSetupSql = import ./generators/mk-serving-setup-sql.nix {
@@ -128,11 +129,13 @@
     dbUser = cfg.database.user;
     servingSchema = cfg.serving.schema;
     lowresSchema = cfg.naturalEarth.schema;
+    profile = cfg.serving.profile;
   };
 
   servingRefreshSql = import ./generators/mk-serving-refresh-sql.nix {
     inherit lib;
     servingSchema = cfg.serving.schema;
+    profile = cfg.serving.profile;
   };
 
   servingSetupSqlFile = pkgs.writeText "osm-tiles-serving-setup.sql" servingSetupSql;
@@ -146,6 +149,7 @@
       poolSize = cfg.martin.poolSize;
       workerProcesses = cfg.martin.workerProcesses;
       servingSchema = cfg.serving.schema;
+      profile = cfg.serving.profile;
     }
   );
 
@@ -153,6 +157,7 @@
     inherit pkgs;
     title = cfg.sampleClient.title;
     maptilesPath = cfg.martin.routePrefix;
+    servingProfile = cfg.serving.profile;
   };
 
   normalizePath = path: let
@@ -534,6 +539,15 @@ in {
     };
 
     serving = {
+      profile = lib.mkOption {
+        type = lib.types.enum [
+          "openmaptiles"
+          "compact"
+        ];
+        default = "openmaptiles";
+        description = "Serving profile: `openmaptiles` exposes the richer OpenMapTiles-like backend, while `compact` keeps the lightweight 4-layer demo profile.";
+      };
+
       schema = lib.mkOption {
         type = lib.types.str;
         default = "osm_serving";

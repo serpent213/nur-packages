@@ -8,6 +8,8 @@
 - Optional nginx caching reverse proxy
 - Optional sample MapLibre JS website
 
+By default it uses an `openmaptiles` serving profile (richer layer/function set, closer to the original `maps.nix` stack). You can switch to a lighter `compact` profile via `services.osmTiles.serving.profile = "compact";`.
+
 ## Minimal NE-only setup
 
 ```nix

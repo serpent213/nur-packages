@@ -14,6 +14,16 @@
       "en"
       "de"
     ];
+    profile = "compact";
+  };
+
+  flexLuaOpenmaptiles = import ../../modules/osm-tiles/generators/mk-flex-lua.nix {
+    inherit
+      lib
+      pkgs
+      ;
+    locales = ["en"];
+    profile = "openmaptiles";
   };
 
   setupSqlNoCountries = pkgs.writeText "osm-tiles-test-setup-no-countries.sql" (
@@ -27,6 +37,7 @@
       dbUser = "osm_maps";
       servingSchema = "osm_serving";
       lowresSchema = "osm_lowres";
+      profile = "compact";
     }
   );
 
@@ -41,6 +52,19 @@
       dbUser = "osm_maps";
       servingSchema = "osm_serving";
       lowresSchema = "osm_lowres";
+      profile = "compact";
+    }
+  );
+
+  setupSqlOpenmaptiles = pkgs.writeText "osm-tiles-test-setup-openmaptiles.sql" (
+    import ../../modules/osm-tiles/generators/mk-serving-setup-sql.nix {
+      inherit lib;
+      locales = ["en"];
+      countrySchemas = ["osm_germany"];
+      dbUser = "osm_maps";
+      servingSchema = "osm_serving";
+      lowresSchema = "osm_lowres";
+      profile = "openmaptiles";
     }
   );
 
@@ -52,6 +76,19 @@
       poolSize = 40;
       workerProcesses = 5;
       servingSchema = "osm_serving";
+      profile = "compact";
+    }
+  );
+
+  martinYamlOpenmaptiles = pkgs.writeText "osm-tiles-test-martin-openmaptiles.yaml" (
+    import ../../modules/osm-tiles/generators/mk-martin-yaml.nix {
+      inherit lib;
+      routePrefix = "/maptiles";
+      connectionString = "postgresql://osm_maps@/osm_maps?host=/run/postgresql&sslmode=disable";
+      poolSize = 40;
+      workerProcesses = 5;
+      servingSchema = "osm_serving";
+      profile = "openmaptiles";
     }
   );
 
@@ -184,14 +221,18 @@ in
     set -euo pipefail
 
     ${pkgs.gnugrep}/bin/grep -F 'local locale_codes = { "en", "de" }' ${flexLua}
+    ${pkgs.gnugrep}/bin/grep -F 'tables.transportation = osm2pgsql.define_table({' ${flexLuaOpenmaptiles}
 
     ${pkgs.gnugrep}/bin/grep -F 'AS name_en' ${setupSqlNoCountries}
     ${pkgs.gnugrep}/bin/grep -F 'AS name_de' ${setupSqlNoCountries}
     ${pkgs.gnugrep}/bin/grep -F 'WHERE FALSE' ${setupSqlNoCountries}
 
     ${pkgs.gnugrep}/bin/grep -F 'FROM "osm_germany"."landcover" c' ${setupSqlOneCountry}
+    ${pkgs.gnugrep}/bin/grep -F 'CREATE OR REPLACE VIEW "osm_serving"."transportation"' ${setupSqlOpenmaptiles}
+    ${pkgs.gnugrep}/bin/grep -F 'CREATE MATERIALIZED VIEW "osm_serving"."transportation_low_z7"' ${setupSqlOpenmaptiles}
 
     ${pkgs.gnugrep}/bin/grep -F '"route_prefix":"/maptiles"' ${martinYaml}
+    ${pkgs.gnugrep}/bin/grep -F '"transportation":{"bounds"' ${martinYamlOpenmaptiles}
 
     touch "$out"
   ''

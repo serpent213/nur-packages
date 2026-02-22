@@ -2,6 +2,7 @@
   pkgs,
   title ? "OSM Tiles Demo",
   maptilesPath ? "/maptiles",
+  servingProfile ? "compact",
   maplibreCssUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css",
   maplibreJsUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js",
 }: let
@@ -11,6 +12,30 @@
     else if builtins.substring 0 1 maptilesPath == "/"
     then maptilesPath
     else "/${maptilesPath}";
+
+  sourceLayers =
+    if servingProfile == "openmaptiles"
+    then [
+      "landcover"
+      "landuse"
+      "park"
+      "water"
+      "waterway"
+      "boundary"
+      "transportation"
+      "transportation_name"
+      "water_name"
+      "place"
+    ]
+    else [
+      "landcover"
+      "water"
+      "boundary"
+      "place"
+    ];
+
+  sourceLayersCsv = builtins.concatStringsSep "," sourceLayers;
+  sourceLayersLegend = builtins.concatStringsSep ", " sourceLayers;
 in
   pkgs.runCommand "osm-tiles-sample-client" {} ''
     mkdir -p "$out"
@@ -55,14 +80,14 @@ in
         <div class="legend">
           <div><strong>Sample MapLibre Client</strong></div>
           <div>Tiles: ${normalizedPath}</div>
-          <div>Layers: landcover, water, boundary, place</div>
+          <div>Layers: ${sourceLayersLegend}</div>
         </div>
         <div id="map"></div>
 
         <script src="${maplibreJsUrl}"></script>
         <script>
           const maptilesBaseUrl = window.location.origin + "${normalizedPath}";
-          const maptilesUrlTemplate = maptilesBaseUrl + "/landcover,water,boundary,place/{z}/{x}/{y}";
+          const maptilesUrlTemplate = maptilesBaseUrl + "/${sourceLayersCsv}/{z}/{x}/{y}";
 
           const map = new maplibregl.Map({
             container: "map",
@@ -92,6 +117,58 @@ in
                   "source-layer": "landcover",
                   paint: {"fill-color": "#dbe9d5", "fill-opacity": 0.9}
                 },
+                ${
+      if servingProfile == "openmaptiles"
+      then ''
+        {
+          id: "landuse",
+          type: "fill",
+          source: "osm_tiles",
+          "source-layer": "landuse",
+          paint: {"fill-color": "#e9e2c2", "fill-opacity": 0.35}
+        },
+        {
+          id: "park",
+          type: "fill",
+          source: "osm_tiles",
+          "source-layer": "park",
+          paint: {"fill-color": "#cfe8c8", "fill-opacity": 0.55}
+        },
+        {
+          id: "waterway",
+          type: "line",
+          source: "osm_tiles",
+          "source-layer": "waterway",
+          paint: {"line-color": "#8ab6e3", "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.2, 12, 1.3]}
+        },
+        {
+          id: "transportation",
+          type: "line",
+          source: "osm_tiles",
+          "source-layer": "transportation",
+          paint: {"line-color": "#5f6672", "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.35, 12, 2.2]}
+        },
+        {
+          id: "transportation_name",
+          type: "symbol",
+          source: "osm_tiles",
+          "source-layer": "transportation_name",
+          minzoom: 10,
+          layout: {"text-field": ["coalesce", ["get", "name_en"], ["get", "name"], ["get", "ref"]], "text-size": 11},
+          paint: {"text-color": "#354052", "text-halo-color": "#f4f7fb", "text-halo-width": 1}
+        },
+        {
+          id: "water_name",
+          type: "symbol",
+          source: "osm_tiles",
+          "source-layer": "water_name",
+          minzoom: 9,
+          layout: {"text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-size": 11},
+          paint: {"text-color": "#4f7fb4", "text-halo-color": "#f4f7fb", "text-halo-width": 1}
+        },
+      ''
+      else ""
+    }
                 {
                   id: "water",
                   type: "fill",
@@ -108,14 +185,14 @@ in
                 },
                 {
                   id: "place",
-                  type: "circle",
+                  type: "symbol",
                   source: "osm_tiles",
                   "source-layer": "place",
-                  paint: {
-                    "circle-color": "#2d6cdf",
-                    "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.5, 5, 4],
-                    "circle-opacity": 0.9
-                  }
+                  layout: {
+                    "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
+                    "text-size": ["interpolate", ["linear"], ["zoom"], 2, 10, 8, 14]
+                  },
+                  paint: {"text-color": "#213042", "text-halo-color": "#f4f7fb", "text-halo-width": 1}
                 }
               ]
             }

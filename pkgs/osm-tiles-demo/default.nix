@@ -7,6 +7,7 @@
   geofabrikBaseUrl ? "https://download.geofabrik.de",
   osm2pgsqlImportCacheMB ? 4096,
   osm2pgsqlImportProcesses ? 4,
+  servingProfile ? "openmaptiles",
   maplibreCssUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css",
   maplibreJsUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js",
 }:
@@ -14,6 +15,7 @@ assert lib.assertMsg (locales != []) "osm-tiles-demo: `locales` must not be empt
 assert lib.assertMsg (builtins.all builtins.isString locales) "osm-tiles-demo: `locales` must be a list of strings.";
 assert lib.assertMsg (builtins.all builtins.isString countries) "osm-tiles-demo: `countries` must be a list of Geofabrik path strings (for example `europe/germany`).";
 assert lib.assertMsg (builtins.isInt ramMB && ramMB > 0) "osm-tiles-demo: `ramMB` must be a positive integer.";
+assert lib.assertMsg (builtins.elem servingProfile ["openmaptiles" "compact"]) "osm-tiles-demo: `servingProfile` must be `openmaptiles` or `compact`.";
 assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
   osm-tiles-demo builds a Linux Docker image and must be evaluated on a Linux target system.
   On macOS, build with a Linux builder (for example: `nix build --system aarch64-linux .#osm-tiles-demo`).
@@ -46,6 +48,29 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
 
   countrySchemas = map (country: country.schema) countrySpecs;
 
+  analyzeTables =
+    if servingProfile == "openmaptiles"
+    then [
+      "landcover"
+      "landuse"
+      "park"
+      "water"
+      "waterway"
+      "boundary"
+      "transportation"
+      "aeroway"
+      "transportation_name"
+      "building"
+      "water_name"
+      "place"
+    ]
+    else [
+      "landcover"
+      "water"
+      "boundary"
+      "place"
+    ];
+
   postgres =
     if pkgs ? postgresql_18
     then pkgs.postgresql_18.withPackages (ps: [ps.postgis])
@@ -61,6 +86,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       dbUser = "osm_maps";
       servingSchema = "osm_serving";
       lowresSchema = "osm_lowres";
+      profile = servingProfile;
     }
   );
 
@@ -72,6 +98,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       dbUser = "osm_maps";
       servingSchema = "osm_serving";
       lowresSchema = "osm_lowres";
+      profile = servingProfile;
     }
   );
 
@@ -79,6 +106,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     import ../../modules/osm-tiles/generators/mk-serving-refresh-sql.nix {
       inherit lib;
       servingSchema = "osm_serving";
+      profile = servingProfile;
     }
   );
 
@@ -88,6 +116,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       pkgs
       ;
     locales = locales;
+    profile = servingProfile;
   };
 
   martinConfig = pkgs.writeText "osm-tiles-demo-martin.yaml" (
@@ -98,6 +127,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       poolSize = 20;
       workerProcesses = 2;
       servingSchema = "osm_serving";
+      profile = servingProfile;
     }
   );
 
@@ -105,6 +135,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     inherit pkgs;
     title = "OSM Tiles Docker Demo";
     maptilesPath = "/maptiles";
+    servingProfile = servingProfile;
     maplibreCssUrl = maplibreCssUrl;
     maplibreJsUrl = maplibreJsUrl;
   };
@@ -139,10 +170,12 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
           "$pbf_file"
 
         rm -f "$pbf_file"
-        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.landcover"
-        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.water"
-        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.boundary"
-        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.place"
+        for table in ${lib.concatStringsSep " " (map lib.escapeShellArg analyzeTables)}; do
+          has_table="$(${postgres}/bin/psql -X -A -t -U osm_maps -d osm_maps -c "SELECT to_regclass('${country.schema}.' || quote_ident('$table')) IS NOT NULL")"
+          if [ "$has_table" = "t" ]; then
+            ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.\"$table\""
+          fi
+        done
       fi
     '')
     countrySpecs;
@@ -375,7 +408,11 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       fi
     ''}
 
-    psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${setupSql}
+    if [ "''${OSM_TILES_SKIP_COUNTRY_IMPORT:-0}" = "1" ] && [ "${toString (countrySpecs != [])}" = "true" ]; then
+      psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${preSetupSql}
+    else
+      psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${setupSql}
+    fi
     psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${refreshSql}
 
     ${martin}/bin/martin --config ${martinConfig} --listen-addresses 127.0.0.1:3000 &
