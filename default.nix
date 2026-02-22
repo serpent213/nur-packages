@@ -13,6 +13,7 @@
 
   martin = pkgs.callPackage ./pkgs/martin {};
   osm-tiles-demo = pkgs.callPackage ./pkgs/osm-tiles-demo {};
+  osm-tiles-tests = pkgs.callPackage ./pkgs/osm-tiles-tests {};
   pushlog = pkgs.callPackage ./pkgs/pushlog {};
   remark42 = pkgs.callPackage ./pkgs/remark42 {};
 }

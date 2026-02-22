@@ -54,3 +54,30 @@ docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_NE_DOWNLOAD=1 osm-tiles-demo:late
 ```
 
 This starts with empty low-res tables.
+
+## Tests
+
+From the NUR repo root (`nix/nur-packages`), run:
+
+```bash
+nix-build -A osm-tiles-tests
+```
+
+Quick checks only (generator/output assertions).
+
+```bash
+nix-build -A osm-tiles-tests.passthru.tests.moduleSmoke
+```
+
+NixOS VM smoke test for the `services.osmTiles` module.
+
+```bash
+nix-build -A osm-tiles-tests.passthru.tests.dockerSmoke
+```
+
+NixOS VM smoke test that loads/runs the `osm-tiles-demo` Docker image and checks HTTP/tile endpoints.
+
+Notes:
+
+- Full smoke tests require a Linux build host.
+- On non-Linux hosts (for example macOS), both smoke targets resolve to explicit `*-skipped` derivations with a reason file.

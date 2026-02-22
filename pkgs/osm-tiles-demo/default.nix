@@ -5,8 +5,7 @@
 assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
   osm-tiles-demo builds a Linux Docker image and must be evaluated on a Linux target system.
   On macOS, build with a Linux builder (for example: `nix build --system aarch64-linux .#osm-tiles-demo`).
-'';
-let
+''; let
   postgres =
     if pkgs ? postgresql_18
     then pkgs.postgresql_18.withPackages (ps: [ps.postgis])
