@@ -5,9 +5,6 @@
   countries ? [],
   ramMB ? 4096,
   geofabrikBaseUrl ? "https://download.geofabrik.de",
-  osm2pgsqlImportCacheMB ? 4096,
-  osm2pgsqlImportProcesses ? 4,
-  servingProfile ? "openmaptiles",
   maplibreCssUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css",
   maplibreJsUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js",
 }:
@@ -15,7 +12,6 @@ assert lib.assertMsg (locales != []) "osm-tiles-demo: `locales` must not be empt
 assert lib.assertMsg (builtins.all builtins.isString locales) "osm-tiles-demo: `locales` must be a list of strings.";
 assert lib.assertMsg (builtins.all builtins.isString countries) "osm-tiles-demo: `countries` must be a list of Geofabrik path strings (for example `europe/germany`).";
 assert lib.assertMsg (builtins.isInt ramMB && ramMB > 0) "osm-tiles-demo: `ramMB` must be a positive integer.";
-assert lib.assertMsg (builtins.elem servingProfile ["openmaptiles" "compact"]) "osm-tiles-demo: `servingProfile` must be `openmaptiles` or `compact`.";
 assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
   osm-tiles-demo builds a Linux Docker image and must be evaluated on a Linux target system.
   On macOS, build with a Linux builder (for example: `nix build --system aarch64-linux .#osm-tiles-demo`).
@@ -30,46 +26,64 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
 
   toMB = mb: "${toString mb}MB";
 
-  sanitizeSchema = name:
-    lib.replaceStrings ["/" " " "." "-"] ["_" "_" "_" "_"] name;
+  sanitizeUnit = name:
+    lib.replaceStrings ["/" " " "." "_"] ["-" "-" "-" "-"] name;
 
-  geofabrikBase =
-    if lib.hasSuffix "/" geofabrikBaseUrl
-    then lib.removeSuffix "/" geofabrikBaseUrl
-    else geofabrikBaseUrl;
+  normalizeUrl = url:
+    if lib.hasSuffix "/" url
+    then lib.removeSuffix "/" url
+    else url;
+
+  geofabrikBase = normalizeUrl geofabrikBaseUrl;
 
   countrySpecs =
     map (path: {
       geofabrikPath = path;
-      schema = "osm_${sanitizeSchema path}";
+      unitName = sanitizeUnit path;
       pbfUrl = "${geofabrikBase}/${path}-latest.osm.pbf";
+      replicationUrl = "${geofabrikBase}/${path}-updates";
     })
     countries;
 
-  countrySchemas = map (country: country.schema) countrySpecs;
+  openmaptilesSource = pkgs.fetchgit {
+    url = "https://github.com/openmaptiles/openmaptiles.git";
+    rev = "672980fcd3b0b2c499a3aa3e9ce576af29ce2f15";
+    hash = "sha256-O1cYB8q9ZWPLF9p/Klvxy4go025U4QvFO/ySAFjtER8=";
+  };
 
-  analyzeTables =
-    if servingProfile == "openmaptiles"
-    then [
-      "landcover"
-      "landuse"
-      "park"
-      "water"
-      "waterway"
-      "boundary"
-      "transportation"
-      "aeroway"
-      "transportation_name"
-      "building"
-      "water_name"
-      "place"
-    ]
-    else [
-      "landcover"
-      "water"
-      "boundary"
-      "place"
-    ];
+  openmaptilesTools = pkgs.callPackage ../openmaptiles-tools {};
+
+  tilesetYaml = pkgs.writeText "osm-tiles-demo-openmaptiles.yaml" (
+    import ../../modules/osm-tiles/generators/mk-openmaptiles-tileset.nix {
+      inherit
+        lib
+        locales
+        ;
+    }
+  );
+
+  artifacts =
+    pkgs.runCommand "osm-tiles-demo-openmaptiles-artifacts" {
+      nativeBuildInputs = [
+        openmaptilesTools
+        pkgs.coreutils
+        pkgs.findutils
+      ];
+    } ''
+      set -euo pipefail
+
+      mkdir -p "$out/sql"
+      cp ${tilesetYaml} "$out/tileset.yaml"
+      ln -s ${openmaptilesSource}/layers "$out/layers"
+
+      generate-imposm3 "$out/tileset.yaml" > "$out/mapping.yaml"
+      generate-sql "$out/tileset.yaml" --dir "$out/sql"
+
+      generate-sqltomvt "$out/tileset.yaml" --layer landcover --function --fname landcover_zxy >> "$out/sql/run_last.sql"
+      generate-sqltomvt "$out/tileset.yaml" --layer water --function --fname water_zxy >> "$out/sql/run_last.sql"
+      generate-sqltomvt "$out/tileset.yaml" --layer boundary --function --fname boundary_zxy >> "$out/sql/run_last.sql"
+      generate-sqltomvt "$out/tileset.yaml" --layer place --function --fname place_zxy >> "$out/sql/run_last.sql"
+    '';
 
   postgres =
     if pkgs ? postgresql_18
@@ -78,105 +92,30 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
 
   martin = pkgs.callPackage ../martin {};
 
-  preSetupSql = pkgs.writeText "osm-tiles-demo-pre-setup.sql" (
-    import ../../modules/osm-tiles/generators/mk-serving-setup-sql.nix {
-      inherit lib;
-      locales = locales;
-      countrySchemas = [];
-      dbUser = "osm_maps";
-      servingSchema = "osm_serving";
-      lowresSchema = "osm_lowres";
-      profile = servingProfile;
-    }
-  );
-
-  setupSql = pkgs.writeText "osm-tiles-demo-setup.sql" (
-    import ../../modules/osm-tiles/generators/mk-serving-setup-sql.nix {
-      inherit lib;
-      locales = locales;
-      countrySchemas = countrySchemas;
-      dbUser = "osm_maps";
-      servingSchema = "osm_serving";
-      lowresSchema = "osm_lowres";
-      profile = servingProfile;
-    }
-  );
-
-  refreshSql = pkgs.writeText "osm-tiles-demo-refresh.sql" (
-    import ../../modules/osm-tiles/generators/mk-serving-refresh-sql.nix {
-      inherit lib;
-      servingSchema = "osm_serving";
-      profile = servingProfile;
-    }
-  );
-
-  flexStyle = import ../../modules/osm-tiles/generators/mk-flex-lua.nix {
-    inherit
-      lib
-      pkgs
-      ;
-    locales = locales;
-    profile = servingProfile;
-  };
-
   martinConfig = pkgs.writeText "osm-tiles-demo-martin.yaml" (
     import ../../modules/osm-tiles/generators/mk-martin-yaml.nix {
       inherit lib;
       routePrefix = "/maptiles";
-      connectionString = "postgresql://osm_maps@/osm_maps?host=/tmp/pgsocket&port=5432&sslmode=disable";
+      connectionString = "postgresql://osm_maps@127.0.0.1:5432/osm_maps?sslmode=disable";
       poolSize = 20;
       workerProcesses = 2;
-      servingSchema = "osm_serving";
-      profile = servingProfile;
+      schema = "public";
     }
   );
 
   sampleClient = import ../../modules/osm-tiles/generators/mk-sample-client.nix {
-    inherit pkgs;
+    inherit
+      pkgs
+      maplibreCssUrl
+      maplibreJsUrl
+      ;
     title = "OSM Tiles Docker Demo";
     maptilesPath = "/maptiles";
-    servingProfile = servingProfile;
-    maplibreCssUrl = maplibreCssUrl;
-    maplibreJsUrl = maplibreJsUrl;
   };
 
-  countryImportScript =
+  countryImportSnippet =
     lib.concatMapStringsSep "\n" (country: ''
-      echo "Ensuring country import: ${country.geofabrikPath} -> ${country.schema}"
-
-      has_landcover="$(${postgres}/bin/psql -X -A -t -U osm_maps -d osm_maps -c "SELECT to_regclass('${country.schema}.landcover') IS NOT NULL")"
-      if [ "$has_landcover" = "t" ]; then
-        echo "Country ${country.geofabrikPath} already imported."
-      else
-        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps \
-          -c "CREATE SCHEMA IF NOT EXISTS \"${country.schema}\" AUTHORIZATION osm_maps"
-
-        pbf_file="$(mktemp -p "$OSM_TILES_DATA_DIR" "country-${sanitizeSchema country.geofabrikPath}.XXXXXX.osm.pbf")"
-        curl --fail --location --retry 5 --output "$pbf_file.tmp" ${lib.escapeShellArg country.pbfUrl}
-        mv "$pbf_file.tmp" "$pbf_file"
-
-        ${pkgs.osm2pgsql}/bin/osm2pgsql \
-          --create \
-          --slim \
-          --output=flex \
-          --style "$OSM_TILES_DATA_DIR/map-style.lua" \
-          --cache "$OSM_TILES_IMPORT_CACHE_MB" \
-          --number-processes "$OSM_TILES_IMPORT_PROCESSES" \
-          --database osm_maps \
-          --username osm_maps \
-          --host "$PG_SOCKET_DIR" \
-          --port "$PGPORT" \
-          --schema ${lib.escapeShellArg country.schema} \
-          "$pbf_file"
-
-        rm -f "$pbf_file"
-        for table in ${lib.concatStringsSep " " (map lib.escapeShellArg analyzeTables)}; do
-          has_table="$(${postgres}/bin/psql -X -A -t -U osm_maps -d osm_maps -c "SELECT to_regclass('${country.schema}.' || quote_ident('$table')) IS NOT NULL")"
-          if [ "$has_table" = "t" ]; then
-            ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.\"$table\""
-          fi
-        done
-      fi
+      import_country ${lib.escapeShellArg country.unitName} ${lib.escapeShellArg country.pbfUrl} ${lib.escapeShellArg country.replicationUrl}
     '')
     countrySpecs;
 
@@ -262,11 +201,13 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       pkgs.gnugrep
       pkgs.gnused
       pkgs.unzip
+      pkgs.imposm
+      pkgs.osmium-tool
       postgres
       pkgs.gdal
       martin
       pkgs.nginx
-      pkgs.osm2pgsql
+      openmaptilesTools
     ]}
     export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 
@@ -274,20 +215,18 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     PGDATA="''${OSM_TILES_PGDATA:-$OSM_TILES_DATA_DIR/postgres}"
     PG_SOCKET_DIR="''${OSM_TILES_PG_SOCKET_DIR:-/tmp/pgsocket}"
     PGPORT="''${OSM_TILES_PGPORT:-5432}"
-    OSM_TILES_IMPORT_CACHE_MB="''${OSM_TILES_IMPORT_CACHE_MB:-${toString osm2pgsqlImportCacheMB}}"
-    OSM_TILES_IMPORT_PROCESSES="''${OSM_TILES_IMPORT_PROCESSES:-${toString osm2pgsqlImportProcesses}}"
-    PGHOST="$PG_SOCKET_DIR"
+    PGHOST="127.0.0.1"
     export PGDATA PGHOST PGPORT
-
-    if [ ! -w "$OSM_TILES_DATA_DIR" ]; then
-      echo "Data dir $OSM_TILES_DATA_DIR is not writable."
-      echo "If you mounted a volume, ensure it is writable by container uid 65534."
-      exit 1
-    fi
 
     mkdir -p \
       "$OSM_TILES_DATA_DIR" \
       "$OSM_TILES_DATA_DIR/cache/nginx" \
+      "$OSM_TILES_DATA_DIR/external" \
+      "$OSM_TILES_DATA_DIR/imposm/cache" \
+      "$OSM_TILES_DATA_DIR/imposm/diff" \
+      "$OSM_TILES_DATA_DIR/imposm/expire" \
+      "$OSM_TILES_DATA_DIR/imposm/config" \
+      "$OSM_TILES_DATA_DIR/pbf" \
       "$PGDATA" \
       "$PG_SOCKET_DIR" \
       /tmp/nginx-client \
@@ -315,105 +254,152 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     }
     trap cleanup EXIT INT TERM
 
-    psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'osm_maps') THEN
-          CREATE ROLE osm_maps LOGIN;
-        END IF;
-      END
-      $$;
-    SQL
+    psql -v ON_ERROR_STOP=1 -U postgres -d postgres -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'osm_maps') THEN CREATE ROLE osm_maps LOGIN; END IF; END \$\$;"
 
     if [ "$(psql -X -A -t -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'osm_maps'")" != "1" ]; then
       createdb -U postgres -O osm_maps --encoding=UTF8 --locale=C --template=template0 osm_maps
     fi
 
-    db_encoding="$(psql -X -A -t -U postgres -d postgres -c "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = 'osm_maps'")"
-    if [ "$db_encoding" != "UTF8" ]; then
-      echo "Database encoding for osm_maps is '$db_encoding', but osm2pgsql requires UTF8."
-      echo "If you use persisted data, remove or migrate OSM_TILES_PGDATA and restart."
-      exit 1
-    fi
+    psql -v ON_ERROR_STOP=1 -U postgres -d osm_maps -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+    psql -v ON_ERROR_STOP=1 -U postgres -d osm_maps -c "CREATE EXTENSION IF NOT EXISTS hstore;"
+    psql -v ON_ERROR_STOP=1 -U postgres -d osm_maps -c "GRANT CONNECT, TEMP ON DATABASE osm_maps TO osm_maps;"
 
-    psql -v ON_ERROR_STOP=1 -U postgres -d osm_maps <<'SQL'
-      CREATE EXTENSION IF NOT EXISTS postgis;
-      CREATE EXTENSION IF NOT EXISTS hstore;
-      GRANT CONNECT, TEMP ON DATABASE osm_maps TO osm_maps;
-    SQL
+    export POSTGRES_HOST=127.0.0.1
+    export POSTGRES_PORT="$PGPORT"
+    export POSTGRES_DB=osm_maps
+    export POSTGRES_USER=osm_maps
+    export POSTGRES_PASSWORD=x
+    export IMPOSM_MAPPING_FILE=${lib.escapeShellArg "${artifacts}/mapping.yaml"}
+    export SQL_TOOLS_DIR=${lib.escapeShellArg "${openmaptilesTools}/sql"}
 
-    # Optional OSM import stub so users can mount and run manual country import later.
-    ln -sf ${flexStyle} "$OSM_TILES_DATA_DIR/map-style.lua"
+    write_cfg() {
+      local unit="$1"
+      local repl_url="$2"
+      local out="$OSM_TILES_DATA_DIR/imposm/config/$unit.json"
+      local norm="$repl_url"
+      norm="''${norm%/}"
+      printf '{\n  "replication_url": "%s/",\n  "replication_interval": "1m"\n}\n' "$norm" > "$out"
+      echo "$out"
+    }
 
-    ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${preSetupSql}
-
-    NE_MARKER="$OSM_TILES_DATA_DIR/.ne_imported"
-    if [ "''${OSM_TILES_SKIP_NE_DOWNLOAD:-0}" != "1" ] && [ ! -f "$NE_MARKER" ]; then
-      tmp_dir="$(mktemp -d)"
-      cleanup_tmp() {
-        rm -rf "$tmp_dir"
-      }
-      trap 'cleanup_tmp; cleanup' EXIT INT TERM
-
-      import_dataset() {
-        local url="$1"
-        local table="$2"
-
-        echo "Importing Natural Earth dataset: $table"
-        local zip_file="$tmp_dir/$table.zip"
-        local unzip_dir="$tmp_dir/$table"
-
-        curl --fail --location --retry 5 --output "$zip_file.tmp" "$url"
-        mv "$zip_file.tmp" "$zip_file"
-        mkdir -p "$unzip_dir"
-        unzip -q "$zip_file" -d "$unzip_dir"
-
-        local shp_file
-        shp_file="$(find "$unzip_dir" -type f -name '*.shp' | head -n1 || true)"
-        if [ -z "$shp_file" ]; then
-          echo "No shapefile found in $zip_file"
-          return 1
-        fi
-
-        OGR_PG_ENABLE_METADATA=NO ogr2ogr \
-          -makevalid \
-          -f PostgreSQL \
-          "PG:dbname=osm_maps user=osm_maps host=$PG_SOCKET_DIR port=$PGPORT" \
-          "$shp_file" \
-          -overwrite \
-          -nlt PROMOTE_TO_MULTI \
-          -nln "osm_lowres.$table" \
-          -lco GEOMETRY_NAME=geom \
-          -lco FID=id \
-          -lco PRECISION=NO \
-          -lco SPATIAL_INDEX=GIST
-
-        psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE osm_lowres.$table"
-      }
-
-      import_dataset "https://naciscdn.org/naturalearth/110m/physical/ne_110m_land.zip" "lowres_landcover"
-      import_dataset "https://naciscdn.org/naturalearth/110m/physical/ne_110m_ocean.zip" "lowres_ocean"
-      import_dataset "https://naciscdn.org/naturalearth/110m/cultural/ne_110m_admin_0_countries.zip" "lowres_boundary"
-      import_dataset "https://naciscdn.org/naturalearth/110m/cultural/ne_110m_populated_places_simple.zip" "lowres_place"
-
-      touch "$NE_MARKER"
-
-      trap cleanup EXIT INT TERM
-      cleanup_tmp
-    fi
-
-    ${lib.optionalString (countrySpecs != []) ''
-      if [ "''${OSM_TILES_SKIP_COUNTRY_IMPORT:-0}" != "1" ]; then
-        ${countryImportScript}
+    import_external() {
+      if [ "''${OSM_TILES_SKIP_EXTERNAL_IMPORT:-0}" = "1" ]; then
+        return
       fi
-    ''}
 
-    if [ "''${OSM_TILES_SKIP_COUNTRY_IMPORT:-0}" = "1" ] && [ "${toString (countrySpecs != [])}" = "true" ]; then
-      psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${preSetupSql}
-    else
-      psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${setupSql}
-    fi
-    psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${refreshSql}
+      if [ -f "$OSM_TILES_DATA_DIR/.external-imported" ]; then
+        return
+      fi
+
+      ne_zip="$OSM_TILES_DATA_DIR/external/natural_earth_vector.sqlite_v5.1.2.zip"
+      ne_sqlite="$OSM_TILES_DATA_DIR/external/natural_earth_vector.sqlite"
+
+      curl --fail --location --retry 5 --output "$ne_zip.tmp" https://dev.maptiler.download/geodata/omt/natural_earth_vector.sqlite_v5.1.2.zip
+      mv "$ne_zip.tmp" "$ne_zip"
+      unzip -oj "$ne_zip" -d "$OSM_TILES_DATA_DIR/external"
+
+      OGR_PG_ENABLE_METADATA=NO ogr2ogr \
+        -f PostgreSQL \
+        -s_srs EPSG:4326 \
+        -t_srs EPSG:3857 \
+        -clipsrc -180.1 -85.0511 180.1 85.0511 \
+        "PG:dbname=osm_maps user=osm_maps host=127.0.0.1 port=$PGPORT password=x" \
+        -lco GEOMETRY_NAME=geometry \
+        -lco OVERWRITE=YES \
+        -lco DIM=2 \
+        -nlt GEOMETRY \
+        -overwrite \
+        "$ne_sqlite"
+
+      water_zip="$OSM_TILES_DATA_DIR/external/water-polygons-split-3857.zip"
+      curl --fail --location --retry 5 --output "$water_zip.tmp" http://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+      mv "$water_zip.tmp" "$water_zip"
+      unzip -oj "$water_zip" -d "$OSM_TILES_DATA_DIR/external"
+
+      OGR_PG_ENABLE_METADATA=NO ogr2ogr \
+        -f PostgreSQL \
+        -s_srs EPSG:3857 \
+        -t_srs EPSG:3857 \
+        -lco OVERWRITE=YES \
+        -lco GEOMETRY_NAME=geometry \
+        -overwrite \
+        -nln "osm_ocean_polygon" \
+        -nlt geometry \
+        --config PG_USE_COPY YES \
+        "PG:dbname=osm_maps user=osm_maps host=127.0.0.1 port=$PGPORT password=x" \
+        "$OSM_TILES_DATA_DIR/external/water_polygons.shp"
+
+      touch "$OSM_TILES_DATA_DIR/.external-imported"
+    }
+
+    run_import() {
+      local unit="$1"
+      local repl_url="$2"
+      local pbf_file="$3"
+      local append="$4"
+      export IMPOSM_CONFIG_FILE="$(write_cfg "$unit" "$repl_url")"
+      export IMPOSM_CACHE_DIR="$OSM_TILES_DATA_DIR/imposm/cache/$unit"
+      export IMPOSM_DIFF_DIR="$OSM_TILES_DATA_DIR/imposm/diff/$unit"
+      export EXPIRETILES_DIR="$OSM_TILES_DATA_DIR/imposm/expire/$unit"
+      mkdir -p "$IMPOSM_CACHE_DIR" "$IMPOSM_DIFF_DIR" "$EXPIRETILES_DIR"
+      if [ "$append" = "1" ]; then
+        APPEND_MODE=true DIFF_MODE=true import-osm "$pbf_file"
+      else
+        APPEND_MODE=false DIFF_MODE=true import-osm "$pbf_file"
+      fi
+    }
+
+    import_country() {
+      local unit="$1"
+      local pbf_url="$2"
+      local repl_url="$3"
+      local pbf_file="$OSM_TILES_DATA_DIR/pbf/$unit.osm.pbf"
+      curl --fail --location --retry 5 --output "$pbf_file.tmp" "$pbf_url"
+      mv "$pbf_file.tmp" "$pbf_file"
+
+      if [ "''${append_mode:-0}" = "0" ]; then
+        run_import "$unit" "$repl_url" "$pbf_file" 0
+        append_mode=1
+      else
+        run_import "$unit" "$repl_url" "$pbf_file" 1
+      fi
+    }
+
+    import_osm_data() {
+      if [ "''${OSM_TILES_SKIP_OSM_IMPORT:-0}" = "1" ]; then
+        return
+      fi
+
+      if [ -f "$OSM_TILES_DATA_DIR/.osm-imported" ]; then
+        return
+      fi
+
+      append_mode=0
+      ${lib.optionalString (countrySpecs != []) countryImportSnippet}
+
+      if [ ${toString (builtins.length countrySpecs)} -eq 0 ]; then
+        printf "%s\n" "<?xml version='1.0' encoding='UTF-8'?>" "<osm version='0.6' generator='osm-tiles'/>" > "$OSM_TILES_DATA_DIR/pbf/empty.osm"
+        osmium cat "$OSM_TILES_DATA_DIR/pbf/empty.osm" -o "$OSM_TILES_DATA_DIR/pbf/empty.osm.pbf"
+        run_import "ne-only" "http://planet.openstreetmap.org/replication/day/" "$OSM_TILES_DATA_DIR/pbf/empty.osm.pbf" 0
+      fi
+
+      touch "$OSM_TILES_DATA_DIR/.osm-imported"
+    }
+
+    import_sql_views() {
+      if [ -f "$OSM_TILES_DATA_DIR/.sql-imported" ]; then
+        return
+      fi
+
+      export SQL_DIR=${lib.escapeShellArg "${artifacts}/sql"}
+      import-sql
+      refresh-views --schema public --pghost 127.0.0.1 --pgport "$PGPORT" --dbname osm_maps --user osm_maps --password x
+      touch "$OSM_TILES_DATA_DIR/.sql-imported"
+    }
+
+    import_external
+    import_osm_data
+    import_sql_views
 
     ${martin}/bin/martin --config ${martinConfig} --listen-addresses 127.0.0.1:3000 &
     martin_pid=$!
@@ -438,10 +424,12 @@ in
       pkgs.unzip
       pkgs.cacert
       pkgs.gdal
-      pkgs.osm2pgsql
+      pkgs.imposm
+      pkgs.osmium-tool
       postgres
       martin
       pkgs.nginx
+      openmaptilesTools
       pkgs.fakeNss
     ];
 

@@ -1,16 +1,15 @@
 # osmTiles
 
-`services.osmTiles` provides a composable map tile stack based on:
+`services.osmTiles` provides an OpenMapTiles-based vector tile stack using:
 
-- `osm2pgsql` imports + replication updates
-- Natural Earth low-resolution fallback data
-- Martin vector tile server
-- Optional nginx caching reverse proxy
-- Optional sample MapLibre JS website
+- `openmaptiles-tools` code generation (`generate-imposm3`, `generate-sql`, `generate-sqltomvt`)
+- `imposm` for OSM snapshot imports and replication updates
+- runtime imports for Natural Earth and water polygons
+- Martin tile server
+- optional nginx cache reverse proxy
+- optional sample MapLibre site
 
-By default it uses an `openmaptiles` serving profile (richer layer/function set, closer to the original `maps.nix` stack). You can switch to a lighter `compact` profile via `services.osmTiles.serving.profile = "compact";`.
-
-## Minimal NE-only setup
+## Minimal setup (NE-only by default countries)
 
 ```nix
 {
@@ -28,40 +27,43 @@ By default it uses an `openmaptiles` serving profile (richer layer/function set,
 }
 ```
 
-This starts with Natural Earth data only (no country extracts) and exposes the sample client on `http://127.0.0.1:8080/`.
-
 ## Country extracts
 
 ```nix
 {
   services.osmTiles.data.countries = {
-    germany = {
-      geofabrikPath = "europe/germany";
-    };
-
-    senegal-and-gambia = {
-      geofabrikPath = "africa/senegal-and-gambia";
-    };
+    hungary.geofabrikPath = "europe/hungary";
+    germany.geofabrikPath = "europe/germany";
   };
 }
 ```
 
+## Components
+
+- `services.osmTiles.components.osmImport.enable`
+- `services.osmTiles.components.osmUpdate.enable`
+- `services.osmTiles.components.martin.enable`
+- `services.osmTiles.components.nginx.enable`
+- `services.osmTiles.components.sampleClient.enable`
+
+If OSM import or update is enabled, Natural Earth/water external imports are enabled as part of bootstrap.
+
 ## Jobs
 
-Two update timers are exposed and configurable:
+Two update timers:
 
 - `services.osmTiles.jobs.osmUpdate.*`
 - `services.osmTiles.jobs.neUpdate.*`
 
-Serving refresh behavior is controlled via:
+Serving refresh timer:
 
 - `services.osmTiles.jobs.servingRefresh.*`
 
-When OSM update job succeeds, `osm-tiles-serving-refresh.service` is triggered automatically.
+The OSM update job triggers `osm-tiles-serving-refresh.service` on successful completion.
 
 ## Managed PostgreSQL RAM
 
-`services.osmTiles.database.managed.ramMB` controls managed PostgreSQL memory tuning:
+`services.osmTiles.database.managed.ramMB` controls managed PostgreSQL tuning:
 
 - `shared_buffers = ramMB`
 - `effective_cache_size = 2 * ramMB`

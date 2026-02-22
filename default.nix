@@ -11,9 +11,6 @@
   locales ? null,
   countries ? null,
   geofabrikBaseUrl ? null,
-  osm2pgsqlImportCacheMB ? null,
-  osm2pgsqlImportProcesses ? null,
-  servingProfile ? null,
   maplibreCssUrl ? null,
   maplibreJsUrl ? null,
 }: let
@@ -24,9 +21,6 @@
     // optionalAttrs (locales != null) {inherit locales;}
     // optionalAttrs (countries != null) {inherit countries;}
     // optionalAttrs (geofabrikBaseUrl != null) {inherit geofabrikBaseUrl;}
-    // optionalAttrs (osm2pgsqlImportCacheMB != null) {inherit osm2pgsqlImportCacheMB;}
-    // optionalAttrs (osm2pgsqlImportProcesses != null) {inherit osm2pgsqlImportProcesses;}
-    // optionalAttrs (servingProfile != null) {inherit servingProfile;}
     // optionalAttrs (maplibreCssUrl != null) {inherit maplibreCssUrl;}
     // optionalAttrs (maplibreJsUrl != null) {inherit maplibreJsUrl;};
 in {
@@ -36,6 +30,7 @@ in {
   overlays = import ./overlays; # nixpkgs overlays
 
   martin = pkgs.callPackage ./pkgs/martin {};
+  openmaptiles-tools = pkgs.callPackage ./pkgs/openmaptiles-tools {};
   osm-tiles-demo = pkgs.callPackage ./pkgs/osm-tiles-demo osmTilesDemoArgs;
   osm-tiles-tests = pkgs.callPackage ./pkgs/osm-tiles-tests {};
   pushlog = pkgs.callPackage ./pkgs/pushlog {};

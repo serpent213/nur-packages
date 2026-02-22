@@ -3,7 +3,9 @@
 This package builds a self-contained Docker image that runs:
 
 - PostgreSQL + PostGIS
-- Natural Earth import (on first start)
+- runtime external imports (Natural Earth + water polygons)
+- runtime OSM import via `imposm` (selected countries or empty bootstrap)
+- generated OpenMapTiles SQL (minimal layer subset)
 - Martin vector tile server
 - nginx cache reverse proxy
 - sample MapLibre JS site
@@ -16,7 +18,7 @@ From the NUR repo root:
 nix build .#osm-tiles-demo
 ```
 
-Example forcing a specific system (required on my macOS/Darwin to pick my x86_64-linux remote build host – Docker build requires some Linux build host):
+On macOS, build with a Linux builder, for example:
 
 ```bash
 nix-build . -A osm-tiles-demo --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
@@ -28,9 +30,8 @@ nix-build . -A osm-tiles-demo --arg pkgs 'import <nixpkgs> { system = "x86_64-li
 
 - `locales` (list of strings, default `["en"]`)
 - `countries` (list of Geofabrik path suffixes, default `[]`)
-- `ramMB` (integer, default `4096`; drives PostgreSQL managed-memory tuning in the demo)
+- `ramMB` (integer, default `4096`; managed PostgreSQL memory target)
 - `geofabrikBaseUrl` (default `https://download.geofabrik.de`)
-- `servingProfile` (`"openmaptiles"` or `"compact"`, default `"openmaptiles"`)
 
 Example:
 
@@ -39,12 +40,9 @@ nix-build . \
   -A osm-tiles-demo \
   --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }' \
   --arg ramMB 8192 \
-  --argstr servingProfile openmaptiles \
-  --arg locales '["en" "de"]' \
-  --arg countries '["europe/germany" "africa/senegal-and-gambia"]'
+  --arg locales '["en" "de" "hu"]' \
+  --arg countries '["europe/hungary"]'
 ```
-
-If `countries` is non-empty, those extracts are imported automatically on first container startup.
 
 ## Load image into Docker
 
@@ -58,11 +56,9 @@ docker load < result
 docker run --rm -p 8080:8080 --name osm-tiles-demo osm-tiles-demo:latest
 ```
 
-Then open:
+Open http://localhost:8080/.
 
-- http://localhost:8080/
-
-The first startup imports Natural Earth files and may take a short while.
+First startup imports external sources and OSM, then prepares SQL/materialized views.
 
 ## Persist demo data (optional)
 
@@ -77,32 +73,21 @@ docker run --rm \
   osm-tiles-demo:latest
 ```
 
-## Skip Natural Earth download (advanced)
+## Runtime skip flags (advanced)
+
+Skip external imports:
 
 ```bash
-docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_NE_DOWNLOAD=1 osm-tiles-demo:latest
+docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_EXTERNAL_IMPORT=1 osm-tiles-demo:latest
 ```
 
-This starts with empty low-res tables.
-
-## Skip country imports (advanced)
+Skip OSM import:
 
 ```bash
-docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_COUNTRY_IMPORT=1 osm-tiles-demo:latest
+docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_OSM_IMPORT=1 osm-tiles-demo:latest
 ```
 
-## Tune country import resources (advanced)
-
-```bash
-docker run --rm -p 8080:8080 \
-  -e OSM_TILES_IMPORT_CACHE_MB=2048 \
-  -e OSM_TILES_IMPORT_PROCESSES=2 \
-  osm-tiles-demo:latest
-```
-
-## Use custom/relative MapLibre asset paths
-
-You can override the sample client MapLibre JS/CSS URLs at build time. Relative paths are supported if your deployment serves those files:
+## Use custom MapLibre asset URLs
 
 ```bash
 nix-build . \
@@ -114,27 +99,20 @@ nix-build . \
 
 ## Tests
 
-From the NUR repo root (`nix/nur-packages`), run:
+From `nix/nur-packages`, run:
 
 ```bash
 nix-build -A osm-tiles-tests
 ```
 
-Quick checks only (generator/output assertions).
+Smoke tests (Linux builder required):
 
 ```bash
 nix-build -A osm-tiles-tests.passthru.tests.moduleSmoke
-```
-
-NixOS VM smoke test for the `services.osmTiles` module.
-
-```bash
 nix-build -A osm-tiles-tests.passthru.tests.dockerSmoke
 ```
 
-NixOS VM smoke test that loads/runs the `osm-tiles-demo` Docker image and checks HTTP/tile endpoints.
-
 Notes:
 
-- Full smoke tests require a Linux build host.
-- On non-Linux hosts (for example macOS), both smoke targets resolve to explicit `*-skipped` derivations with a reason file.
+- NixOS VM smoke tests require a builder with `nixos-test` and `kvm` features.
+- Docker smoke requires builder network/DNS access to fetch pinned upstream OpenMapTiles sources.
