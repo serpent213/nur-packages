@@ -11,6 +11,7 @@
   modules = import ./modules {inherit pkgs;}; # NixOS modules
   overlays = import ./overlays; # nixpkgs overlays
 
+  martin = pkgs.callPackage ./pkgs/martin {};
   pushlog = pkgs.callPackage ./pkgs/pushlog {};
   remark42 = pkgs.callPackage ./pkgs/remark42 {};
 }
