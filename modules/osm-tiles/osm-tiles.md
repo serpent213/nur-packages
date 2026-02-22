@@ -56,3 +56,10 @@ Serving refresh behavior is controlled via:
 - `services.osmTiles.jobs.servingRefresh.*`
 
 When OSM update job succeeds, `osm-tiles-serving-refresh.service` is triggered automatically.
+
+## Managed PostgreSQL RAM
+
+`services.osmTiles.database.managed.ramMB` controls managed PostgreSQL memory tuning:
+
+- `shared_buffers = ramMB`
+- `effective_cache_size = 2 * ramMB`

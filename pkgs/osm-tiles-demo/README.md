@@ -22,6 +22,28 @@ Example forcing a specific system (required on my macOS/Darwin to pick my x86_64
 nix-build . -A osm-tiles-demo --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
 ```
 
+## Build with custom locales/countries
+
+`osm-tiles-demo` accepts build-time args:
+
+- `locales` (list of strings, default `["en"]`)
+- `countries` (list of Geofabrik path suffixes, default `[]`)
+- `ramMB` (integer, default `4096`; drives PostgreSQL managed-memory tuning in the demo)
+- `geofabrikBaseUrl` (default `https://download.geofabrik.de`)
+
+Example:
+
+```bash
+nix-build . \
+  -A osm-tiles-demo \
+  --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }' \
+  --arg ramMB 8192 \
+  --arg locales '["en" "de"]' \
+  --arg countries '["europe/germany" "africa/senegal-and-gambia"]'
+```
+
+If `countries` is non-empty, those extracts are imported automatically on first container startup.
+
 ## Load image into Docker
 
 ```bash
@@ -60,6 +82,33 @@ docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_NE_DOWNLOAD=1 osm-tiles-demo:late
 ```
 
 This starts with empty low-res tables.
+
+## Skip country imports (advanced)
+
+```bash
+docker run --rm -p 8080:8080 -e OSM_TILES_SKIP_COUNTRY_IMPORT=1 osm-tiles-demo:latest
+```
+
+## Tune country import resources (advanced)
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e OSM_TILES_IMPORT_CACHE_MB=2048 \
+  -e OSM_TILES_IMPORT_PROCESSES=2 \
+  osm-tiles-demo:latest
+```
+
+## Use custom/relative MapLibre asset paths
+
+You can override the sample client MapLibre JS/CSS URLs at build time. Relative paths are supported if your deployment serves those files:
+
+```bash
+nix-build . \
+  -A osm-tiles-demo \
+  --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }' \
+  --argstr maplibreCssUrl /assets/maplibre/maplibre-gl.css \
+  --argstr maplibreJsUrl /assets/maplibre/maplibre-gl.js
+```
 
 ## Tests
 

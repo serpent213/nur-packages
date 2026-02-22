@@ -75,8 +75,8 @@
   div = a: b: builtins.floor (a / b);
 
   ramMB = cfg.database.managed.ramMB;
-  sharedBuffersMB = lib.max 256 (div ramMB 4);
-  effectiveCacheMB = lib.max 1024 (div (ramMB * 3) 4);
+  sharedBuffersMB = lib.max 256 ramMB;
+  effectiveCacheMB = lib.max 512 (sharedBuffersMB * 2);
   maintenanceWorkMemMB = lib.max 256 (div ramMB 8);
   autovacuumWorkMemMB = lib.max 128 (div ramMB 16);
   workMemMB = lib.max 8 (div ramMB 256);
@@ -371,7 +371,7 @@ in {
         ramMB = lib.mkOption {
           type = lib.types.int;
           default = 4096;
-          description = "Roundabout max RAM budget for managed PostgreSQL tuning (MB).";
+          description = "Managed PostgreSQL memory target in MB. `shared_buffers` uses this value directly, and `effective_cache_size` is derived as ~2x.";
         };
 
         enableTCPIP = lib.mkOption {

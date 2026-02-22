@@ -2,6 +2,8 @@
   pkgs,
   title ? "OSM Tiles Demo",
   maptilesPath ? "/maptiles",
+  maplibreCssUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css",
+  maplibreJsUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js",
 }: let
   normalizedPath =
     if maptilesPath == ""
@@ -20,7 +22,7 @@ in
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${title}</title>
-        <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css" />
+        <link rel="stylesheet" href="${maplibreCssUrl}" />
         <style>
           html, body {
             margin: 0;
@@ -57,8 +59,11 @@ in
         </div>
         <div id="map"></div>
 
-        <script src="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js"></script>
+        <script src="${maplibreJsUrl}"></script>
         <script>
+          const maptilesBaseUrl = window.location.origin + "${normalizedPath}";
+          const maptilesUrlTemplate = maptilesBaseUrl + "/landcover,water,boundary,place/{z}/{x}/{y}";
+
           const map = new maplibregl.Map({
             container: "map",
             center: [8, 20],
@@ -69,7 +74,7 @@ in
               sources: {
                 osm_tiles: {
                   type: "vector",
-                  tiles: ["${normalizedPath}/landcover,water,boundary,place/{z}/{x}/{y}"],
+                  tiles: [maptilesUrlTemplate],
                   minzoom: 0,
                   maxzoom: 14
                 }

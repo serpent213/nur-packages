@@ -1,11 +1,51 @@
 {
   lib,
   pkgs,
+  locales ? ["en"],
+  countries ? [],
+  ramMB ? 4096,
+  geofabrikBaseUrl ? "https://download.geofabrik.de",
+  osm2pgsqlImportCacheMB ? 4096,
+  osm2pgsqlImportProcesses ? 4,
+  maplibreCssUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css",
+  maplibreJsUrl ? "https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js",
 }:
+assert lib.assertMsg (locales != []) "osm-tiles-demo: `locales` must not be empty.";
+assert lib.assertMsg (builtins.all builtins.isString locales) "osm-tiles-demo: `locales` must be a list of strings.";
+assert lib.assertMsg (builtins.all builtins.isString countries) "osm-tiles-demo: `countries` must be a list of Geofabrik path strings (for example `europe/germany`).";
+assert lib.assertMsg (builtins.isInt ramMB && ramMB > 0) "osm-tiles-demo: `ramMB` must be a positive integer.";
 assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
   osm-tiles-demo builds a Linux Docker image and must be evaluated on a Linux target system.
   On macOS, build with a Linux builder (for example: `nix build --system aarch64-linux .#osm-tiles-demo`).
 ''; let
+  div = a: b: builtins.floor (a / b);
+
+  sharedBuffersMB = lib.max 256 ramMB;
+  effectiveCacheMB = lib.max 512 (sharedBuffersMB * 2);
+  maintenanceWorkMemMB = lib.max 256 (div ramMB 8);
+  autovacuumWorkMemMB = lib.max 128 (div ramMB 16);
+  workMemMB = lib.max 8 (div ramMB 256);
+
+  toMB = mb: "${toString mb}MB";
+
+  sanitizeSchema = name:
+    lib.replaceStrings ["/" " " "." "-"] ["_" "_" "_" "_"] name;
+
+  geofabrikBase =
+    if lib.hasSuffix "/" geofabrikBaseUrl
+    then lib.removeSuffix "/" geofabrikBaseUrl
+    else geofabrikBaseUrl;
+
+  countrySpecs =
+    map (path: {
+      geofabrikPath = path;
+      schema = "osm_${sanitizeSchema path}";
+      pbfUrl = "${geofabrikBase}/${path}-latest.osm.pbf";
+    })
+    countries;
+
+  countrySchemas = map (country: country.schema) countrySpecs;
+
   postgres =
     if pkgs ? postgresql_18
     then pkgs.postgresql_18.withPackages (ps: [ps.postgis])
@@ -13,11 +53,22 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
 
   martin = pkgs.callPackage ../martin {};
 
+  preSetupSql = pkgs.writeText "osm-tiles-demo-pre-setup.sql" (
+    import ../../modules/osm-tiles/generators/mk-serving-setup-sql.nix {
+      inherit lib;
+      locales = locales;
+      countrySchemas = [];
+      dbUser = "osm_maps";
+      servingSchema = "osm_serving";
+      lowresSchema = "osm_lowres";
+    }
+  );
+
   setupSql = pkgs.writeText "osm-tiles-demo-setup.sql" (
     import ../../modules/osm-tiles/generators/mk-serving-setup-sql.nix {
       inherit lib;
-      locales = ["en"];
-      countrySchemas = [];
+      locales = locales;
+      countrySchemas = countrySchemas;
       dbUser = "osm_maps";
       servingSchema = "osm_serving";
       lowresSchema = "osm_lowres";
@@ -36,7 +87,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       lib
       pkgs
       ;
-    locales = ["en"];
+    locales = locales;
   };
 
   martinConfig = pkgs.writeText "osm-tiles-demo-martin.yaml" (
@@ -54,7 +105,47 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     inherit pkgs;
     title = "OSM Tiles Docker Demo";
     maptilesPath = "/maptiles";
+    maplibreCssUrl = maplibreCssUrl;
+    maplibreJsUrl = maplibreJsUrl;
   };
+
+  countryImportScript =
+    lib.concatMapStringsSep "\n" (country: ''
+      echo "Ensuring country import: ${country.geofabrikPath} -> ${country.schema}"
+
+      has_landcover="$(${postgres}/bin/psql -X -A -t -U osm_maps -d osm_maps -c "SELECT to_regclass('${country.schema}.landcover') IS NOT NULL")"
+      if [ "$has_landcover" = "t" ]; then
+        echo "Country ${country.geofabrikPath} already imported."
+      else
+        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps \
+          -c "CREATE SCHEMA IF NOT EXISTS \"${country.schema}\" AUTHORIZATION osm_maps"
+
+        pbf_file="$(mktemp -p "$OSM_TILES_DATA_DIR" "country-${sanitizeSchema country.geofabrikPath}.XXXXXX.osm.pbf")"
+        curl --fail --location --retry 5 --output "$pbf_file.tmp" ${lib.escapeShellArg country.pbfUrl}
+        mv "$pbf_file.tmp" "$pbf_file"
+
+        ${pkgs.osm2pgsql}/bin/osm2pgsql \
+          --create \
+          --slim \
+          --output=flex \
+          --style "$OSM_TILES_DATA_DIR/map-style.lua" \
+          --cache "$OSM_TILES_IMPORT_CACHE_MB" \
+          --number-processes "$OSM_TILES_IMPORT_PROCESSES" \
+          --database osm_maps \
+          --username osm_maps \
+          --host "$PG_SOCKET_DIR" \
+          --port "$PGPORT" \
+          --schema ${lib.escapeShellArg country.schema} \
+          "$pbf_file"
+
+        rm -f "$pbf_file"
+        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.landcover"
+        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.water"
+        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.boundary"
+        ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE ${country.schema}.place"
+      fi
+    '')
+    countrySpecs;
 
   nginxConf = pkgs.writeText "osm-tiles-demo-nginx.conf" ''
     worker_processes 1;
@@ -150,6 +241,8 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     PGDATA="''${OSM_TILES_PGDATA:-$OSM_TILES_DATA_DIR/postgres}"
     PG_SOCKET_DIR="''${OSM_TILES_PG_SOCKET_DIR:-/tmp/pgsocket}"
     PGPORT="''${OSM_TILES_PGPORT:-5432}"
+    OSM_TILES_IMPORT_CACHE_MB="''${OSM_TILES_IMPORT_CACHE_MB:-${toString osm2pgsqlImportCacheMB}}"
+    OSM_TILES_IMPORT_PROCESSES="''${OSM_TILES_IMPORT_PROCESSES:-${toString osm2pgsqlImportProcesses}}"
     PGHOST="$PG_SOCKET_DIR"
     export PGDATA PGHOST PGPORT
 
@@ -173,10 +266,10 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     chmod 700 "$PGDATA"
 
     if [ ! -s "$PGDATA/PG_VERSION" ]; then
-      initdb -D "$PGDATA" --auth=trust --username=postgres
+      initdb -D "$PGDATA" --auth=trust --username=postgres --encoding=UTF8 --locale=C
     fi
 
-    pg_ctl -D "$PGDATA" -o "-c listen_addresses='127.0.0.1' -c port=$PGPORT -c unix_socket_directories='$PG_SOCKET_DIR'" -w start
+    pg_ctl -D "$PGDATA" -o "-c listen_addresses='127.0.0.1' -c port=$PGPORT -c unix_socket_directories='$PG_SOCKET_DIR' -c jit=off -c shared_buffers=${toMB sharedBuffersMB} -c effective_cache_size=${toMB effectiveCacheMB} -c work_mem=${toMB workMemMB} -c maintenance_work_mem=${toMB maintenanceWorkMemMB} -c autovacuum_work_mem=${toMB autovacuumWorkMemMB} -c wal_buffers=16MB -c wal_compression=on -c min_wal_size=512MB -c max_wal_size=4GB -c checkpoint_timeout=15min -c checkpoint_completion_target=0.9 -c random_page_cost=1.3 -c effective_io_concurrency=64" -w start
 
     cleanup() {
       if [ -n "''${nginx_pid:-}" ] && kill -0 "$nginx_pid" 2>/dev/null; then
@@ -200,7 +293,14 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
     SQL
 
     if [ "$(psql -X -A -t -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'osm_maps'")" != "1" ]; then
-      createdb -U postgres -O osm_maps osm_maps
+      createdb -U postgres -O osm_maps --encoding=UTF8 --locale=C --template=template0 osm_maps
+    fi
+
+    db_encoding="$(psql -X -A -t -U postgres -d postgres -c "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = 'osm_maps'")"
+    if [ "$db_encoding" != "UTF8" ]; then
+      echo "Database encoding for osm_maps is '$db_encoding', but osm2pgsql requires UTF8."
+      echo "If you use persisted data, remove or migrate OSM_TILES_PGDATA and restart."
+      exit 1
     fi
 
     psql -v ON_ERROR_STOP=1 -U postgres -d osm_maps <<'SQL'
@@ -211,6 +311,8 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
 
     # Optional OSM import stub so users can mount and run manual country import later.
     ln -sf ${flexStyle} "$OSM_TILES_DATA_DIR/map-style.lua"
+
+    ${postgres}/bin/psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${preSetupSql}
 
     NE_MARKER="$OSM_TILES_DATA_DIR/.ne_imported"
     if [ "''${OSM_TILES_SKIP_NE_DOWNLOAD:-0}" != "1" ] && [ ! -f "$NE_MARKER" ]; then
@@ -256,8 +358,6 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
         psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -c "ANALYZE osm_lowres.$table"
       }
 
-      psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${setupSql}
-
       import_dataset "https://naciscdn.org/naturalearth/110m/physical/ne_110m_land.zip" "lowres_landcover"
       import_dataset "https://naciscdn.org/naturalearth/110m/physical/ne_110m_ocean.zip" "lowres_ocean"
       import_dataset "https://naciscdn.org/naturalearth/110m/cultural/ne_110m_admin_0_countries.zip" "lowres_boundary"
@@ -268,6 +368,12 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       trap cleanup EXIT INT TERM
       cleanup_tmp
     fi
+
+    ${lib.optionalString (countrySpecs != []) ''
+      if [ "''${OSM_TILES_SKIP_COUNTRY_IMPORT:-0}" != "1" ]; then
+        ${countryImportScript}
+      fi
+    ''}
 
     psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${setupSql}
     psql -v ON_ERROR_STOP=1 -U osm_maps -d osm_maps -f ${refreshSql}
