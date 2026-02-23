@@ -67,3 +67,4 @@ The OSM update job triggers `osm-tiles-serving-refresh.service` on successful co
 
 - `shared_buffers = ramMB`
 - `effective_cache_size = 2 * ramMB`
+- `max_wal_size = max(4096MB, 2 * ramMB)`

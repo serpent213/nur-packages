@@ -91,33 +91,11 @@
     ]
     ++ psqlHostArgs;
 
-  div = a: b: builtins.floor (a / b);
-
   ramMB = cfg.database.managed.ramMB;
-  sharedBuffersMB = lib.max 256 ramMB;
-  effectiveCacheMB = lib.max 512 (sharedBuffersMB * 2);
-  maintenanceWorkMemMB = lib.max 256 (div ramMB 8);
-  autovacuumWorkMemMB = lib.max 128 (div ramMB 16);
-  workMemMB = lib.max 8 (div ramMB 256);
-
-  toMB = mb: "${toString mb}MB";
-
-  managedPostgresqlSettings = {
-    jit = "off";
-    shared_buffers = toMB sharedBuffersMB;
-    effective_cache_size = toMB effectiveCacheMB;
-    work_mem = toMB workMemMB;
-    maintenance_work_mem = toMB maintenanceWorkMemMB;
-    autovacuum_work_mem = toMB autovacuumWorkMemMB;
-    wal_buffers = "16MB";
-    wal_compression = "on";
-    min_wal_size = "512MB";
-    max_wal_size = "4GB";
-    checkpoint_timeout = "15min";
-    checkpoint_completion_target = "0.9";
-    random_page_cost = "1.3";
-    effective_io_concurrency = "64";
+  postgresTuning = import ./generators/mk-postgres-tuning.nix {
+    inherit lib ramMB;
   };
+  managedPostgresqlSettings = postgresTuning.settings;
 
   postgresqlPackage =
     if config.services.postgresql.enable
@@ -410,7 +388,7 @@ in {
         ramMB = lib.mkOption {
           type = lib.types.int;
           default = 4096;
-          description = "Managed PostgreSQL memory target in MB. `shared_buffers=ramMB` and `effective_cache_size=2x`.";
+          description = "Managed PostgreSQL memory target in MB. Used for memory tuning (`shared_buffers=ramMB`, `effective_cache_size=2x`) and WAL sizing.";
         };
 
         enableTCPIP = lib.mkOption {
@@ -707,6 +685,7 @@ in {
 
             ${postgresqlPackage}/bin/psql ${lib.escapeShellArgs (adminPsqlArgs cfg.database.name)} -c "CREATE EXTENSION IF NOT EXISTS postgis"
             ${postgresqlPackage}/bin/psql ${lib.escapeShellArgs (adminPsqlArgs cfg.database.name)} -c "CREATE EXTENSION IF NOT EXISTS hstore"
+            ${postgresqlPackage}/bin/psql ${lib.escapeShellArgs (adminPsqlArgs cfg.database.name)} -c "CREATE EXTENSION IF NOT EXISTS unaccent"
             ${postgresqlPackage}/bin/psql ${lib.escapeShellArgs (adminPsqlArgs cfg.database.name)} -c "ALTER DATABASE \"${cfg.database.name}\" OWNER TO \"${cfg.database.user}\""
             ${postgresqlPackage}/bin/psql ${lib.escapeShellArgs (adminPsqlArgs cfg.database.name)} -c "GRANT CONNECT, TEMP ON DATABASE \"${cfg.database.name}\" TO \"${cfg.database.user}\""
           '';
@@ -972,6 +951,9 @@ in {
             set -euo pipefail
 
             export PATH=${lib.makeBinPath [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.findutils
               postgresqlPackage
               openmaptilesTools
             ]}
@@ -992,6 +974,24 @@ in {
             export POSTGRES_PASSWORD="$PGPASSWORD"
             export SQL_TOOLS_DIR=${lib.escapeShellArg "${openmaptilesTools}/sql"}
             export SQL_DIR=${lib.escapeShellArg "${generatedArtifacts}/sql"}
+
+            ${postgresqlPackage}/bin/psql ${lib.escapeShellArgs psqlUserArgs} <<'SQL'
+            CREATE OR REPLACE FUNCTION osml10n_get_name_without_brackets_from_tags(
+              tags hstore,
+              lang text,
+              geometry geometry
+            ) RETURNS text AS $$
+              SELECT NULLIF(
+                regexp_replace(
+                  COALESCE(tags -> ('name:' || lang), tags -> 'name'),
+                  '\s*[\(\[].*?[\)\]]\s*',
+                  ' ',
+                  'g'
+                ),
+                left('x', 0)
+              );
+            $$ LANGUAGE SQL IMMUTABLE;
+            SQL
 
             import-sql
           '';
@@ -1028,16 +1028,18 @@ in {
             ''}
             : "''${PGPASSWORD:=x}"
 
-            refresh-views --schema ${lib.escapeShellArg cfg.serving.schema} \
-              --pghost ${lib.escapeShellArg (
-              if dbHost != null
+            export PGHOST=${lib.escapeShellArg (
+              if dbSocketDir != null
+              then dbSocketDir
+              else if dbHost != null
               then dbHost
               else "127.0.0.1"
-            )} \
-              --pgport ${lib.escapeShellArg (toString cfg.database.port)} \
-              --dbname ${lib.escapeShellArg cfg.database.name} \
-              --user ${lib.escapeShellArg cfg.database.user} \
-              --password "$PGPASSWORD"
+            )}
+            export PGPORT=${lib.escapeShellArg (toString cfg.database.port)}
+            export PGDATABASE=${lib.escapeShellArg cfg.database.name}
+            export PGUSER=${lib.escapeShellArg cfg.database.user}
+
+            refresh-views --schema ${lib.escapeShellArg cfg.serving.schema}
           '';
         };
       }

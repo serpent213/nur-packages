@@ -30,7 +30,7 @@ nix-build . -A osm-tiles-demo --arg pkgs 'import <nixpkgs> { system = "x86_64-li
 
 - `locales` (list of strings, default `["en"]`)
 - `countries` (list of Geofabrik path suffixes, default `[]`)
-- `ramMB` (integer, default `4096`; managed PostgreSQL memory target)
+- `ramMB` (integer, default `4096`; PostgreSQL tuning target, including `shared_buffers=ramMB`, `effective_cache_size=2*ramMB`, dynamic WAL sizing)
 - `geofabrikBaseUrl` (default `https://download.geofabrik.de`)
 
 Example:

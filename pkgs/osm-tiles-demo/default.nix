@@ -16,15 +16,12 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
   osm-tiles-demo builds a Linux Docker image and must be evaluated on a Linux target system.
   On macOS, build with a Linux builder (for example: `nix build --system aarch64-linux .#osm-tiles-demo`).
 ''; let
-  div = a: b: builtins.floor (a / b);
-
-  sharedBuffersMB = lib.max 256 ramMB;
-  effectiveCacheMB = lib.max 512 (sharedBuffersMB * 2);
-  maintenanceWorkMemMB = lib.max 256 (div ramMB 8);
-  autovacuumWorkMemMB = lib.max 128 (div ramMB 16);
-  workMemMB = lib.max 8 (div ramMB 256);
-
-  toMB = mb: "${toString mb}MB";
+  postgresTuning = import ../../modules/osm-tiles/generators/mk-postgres-tuning.nix {
+    inherit lib ramMB;
+  };
+  postgresArgs = lib.concatStringsSep " " (
+    lib.mapAttrsToList (key: value: "-c ${key}=${lib.escapeShellArg value}") postgresTuning.settings
+  );
 
   sanitizeUnit = name:
     lib.replaceStrings ["/" " " "." "_"] ["-" "-" "-" "-"] name;
@@ -241,7 +238,7 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
       initdb -D "$PGDATA" --auth=trust --username=postgres --encoding=UTF8 --locale=C
     fi
 
-    pg_ctl -D "$PGDATA" -o "-c listen_addresses='127.0.0.1' -c port=$PGPORT -c unix_socket_directories='$PG_SOCKET_DIR' -c jit=off -c shared_buffers=${toMB sharedBuffersMB} -c effective_cache_size=${toMB effectiveCacheMB} -c work_mem=${toMB workMemMB} -c maintenance_work_mem=${toMB maintenanceWorkMemMB} -c autovacuum_work_mem=${toMB autovacuumWorkMemMB} -c wal_buffers=16MB -c wal_compression=on -c min_wal_size=512MB -c max_wal_size=4GB -c checkpoint_timeout=15min -c checkpoint_completion_target=0.9 -c random_page_cost=1.3 -c effective_io_concurrency=64" -w start
+    pg_ctl -D "$PGDATA" -o "-c listen_addresses='127.0.0.1' -c port=$PGPORT -c unix_socket_directories='$PG_SOCKET_DIR' ${postgresArgs}" -w start
 
     cleanup() {
       if [ -n "''${nginx_pid:-}" ] && kill -0 "$nginx_pid" 2>/dev/null; then
@@ -391,9 +388,32 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux ''
         return
       fi
 
+      psql -h 127.0.0.1 -p "$PGPORT" -U osm_maps -d osm_maps <<'SQL'
+      CREATE OR REPLACE FUNCTION osml10n_get_name_without_brackets_from_tags(
+        tags hstore,
+        lang text,
+        geometry geometry
+      ) RETURNS text AS $$
+        SELECT NULLIF(
+          regexp_replace(
+            COALESCE(tags -> ('name:' || lang), tags -> 'name'),
+            '\s*[\(\[].*?[\)\]]\s*',
+            ' ',
+            'g'
+          ),
+          left('x', 0)
+        );
+      $$ LANGUAGE SQL IMMUTABLE;
+      SQL
+
       export SQL_DIR=${lib.escapeShellArg "${artifacts}/sql"}
       import-sql
-      refresh-views --schema public --pghost 127.0.0.1 --pgport "$PGPORT" --dbname osm_maps --user osm_maps --password x
+      export PGHOST=127.0.0.1
+      export PGPORT="$PGPORT"
+      export PGDATABASE=osm_maps
+      export PGUSER=osm_maps
+      export PGPASSWORD=x
+      refresh-views --schema public
       touch "$OSM_TILES_DATA_DIR/.sql-imported"
     }
 
